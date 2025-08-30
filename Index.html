@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+ <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -84,4 +84,443 @@
     .danger{background: #36141a; border:1px solid #5a1f2b;color:#fecaca}
     .success{background:#102a1a;border:1px solid #1e3a2d;color:#bbf7d0}
     .hint{font-size:12px;color:#a5b4fc}
-    .kbd{font-family:ui-monospace,SFMono-Regular,Men
+    .kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;background:#101626;border:1px solid #243244;border-bottom-width:2px;border-radius:6px;padding:2px 6px;color:#93c5fd}
+    .tag{padding:2px 8px;border:1px solid #1f2a44;border-radius:999px;font-size:12px;color:#cbd5e1}
+    .hidden{display:none}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M4 4h16v4H4zM4 10h16v4H4zM4 16h10v4H4z" stroke="#38bdf8" stroke-width="2"/></svg>
+      <div>FormLooper</div>
+      <span class="badge">PWA</span>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btn-export-csv">Export CSV</button>
+      <button class="btn secondary" id="btn-import-csv">Import CSV</button>
+      <button class="btn ghost" id="btn-new">New Project</button>
+      <a id="hidden-download" class="hidden" download></a>
+      <input id="hidden-file" class="hidden" type="file" accept=".csv,.json" />
+    </div>
+  </header>
+
+  <main>
+    <section class="card" id="builder">
+      <h2>Form Builder</h2>
+      <div class="sub">Add fields, reorder with ↑/↓, and save the schema. Supports Text, Number, Date, Select, and Checkbox.</div>
+
+      <div class="stack" id="fields"></div>
+
+      <div class="toolbar">
+        <select id="new-type">
+          <option value="text">Text</option>
+          <option value="number">Number</option>
+          <option value="date">Date</option>
+          <option value="select">Select</option>
+          <option value="checkbox">Checkbox</option>
+        </select>
+        <input id="new-label" type="text" placeholder="Field label (e.g., Customer Name)" />
+        <input id="new-key" type="text" placeholder="Key (e.g., customer_name)" />
+        <input id="new-meta" type="text" placeholder="Select options (comma-separated)" />
+        <button class="btn" id="btn-add">Add Field</button>
+      </div>
+
+      <div class="row">
+        <button class="btn secondary" id="btn-save-schema">Save Schema</button>
+        <button class="btn ghost" id="btn-load-schema">Load Schema</button>
+        <span class="pill">Autosaves locally</span>
+      </div>
+
+      <div class="success pill hidden" id="schema-saved">Schema saved ✓</div>
+    </section>
+
+    <section class="card" id="runner">
+      <h2>Looping Data Entry</h2>
+      <div class="sub">Fill in each record. Use Next/Prev. Everything is autosaved. Export to CSV anytime.</div>
+
+      <div class="record-toolbar">
+        <button class="btn" id="btn-first">« First</button>
+        <button class="btn" id="btn-prev">‹ Prev</button>
+        <span class="pill" id="rec-indicator">Record 1 of 1</span>
+        <button class="btn" id="btn-next">Next ›</button>
+        <button class="btn" id="btn-last">Last »</button>
+        <button class="btn secondary" id="btn-add-record">Add Record</button>
+        <button class="btn ghost" id="btn-delete-record">Delete</button>
+      </div>
+
+      <div class="progress"><div id="progress-bar"></div></div>
+
+      <div id="entry-area" class="stack" style="margin-top:12px"></div>
+
+      <details style="margin-top:12px">
+        <summary class="muted">Quick tips</summary>
+        <ul class="muted">
+          <li>Press <span class="kbd">Ctrl</span> + <span class="kbd">Enter</span> to go to the next record.</li>
+          <li>Use Export CSV to share or back up your data.</li>
+          <li>Import either a CSV (to load data) or a JSON schema (to load field layout).</li>
+        </ul>
+      </details>
+    </section>
+  </main>
+
+  <div class="footer">
+    <span class="tag">Local-first</span>
+    <span class="tag">Offline-ready</span>
+    <span class="tag">No account required</span>
+  </div>
+
+  <script>
+  // ---- Utilities ----
+  const $ = sel => document.querySelector(sel);
+  const $$ = sel => Array.from(document.querySelectorAll(sel));
+  const LS_KEY = "formlooper_v1";
+  const defaultState = { schema: [], records: [ {} ], index: 0 };
+
+  function loadState(){
+    try{
+      const raw = localStorage.getItem(LS_KEY);
+      if(!raw) return JSON.parse(JSON.stringify(defaultState));
+      const st = JSON.parse(raw);
+      if(!st.schema) st.schema = [];
+      if(!st.records || !Array.isArray(st.records) || st.records.length===0) st.records = [ {} ];
+      if(typeof st.index !== 'number') st.index = 0;
+      st.index = Math.min(Math.max(0, st.index), st.records.length-1);
+      return st;
+    }catch(e){ console.warn(e); return JSON.parse(JSON.stringify(defaultState)); }
+  }
+  function saveState(st){
+    localStorage.setItem(LS_KEY, JSON.stringify(st));
+  }
+  function slugify(str){
+    return (str||'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');
+  }
+  function toCSV(rows){
+    if(!rows.length) return '';
+    const headers = Object.keys(rows[0]);
+    const esc = v => {
+      if(v===undefined || v===null) return '';
+      v = String(v);
+      return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
+    };
+    const lines = [ headers.join(',') ];
+    for(const row of rows){
+      lines.push(headers.map(h => esc(row[h])).join(','));
+    }
+    return lines.join('\n');
+  }
+  function parseCSV(text){
+    // Simple CSV parser, handles quotes
+    const rows = [];
+    let i=0, cur='', inQ=false, row=[], headers=null;
+    while(i<text.length){
+      const ch = text[i];
+      if(inQ){
+        if(ch === '"'){
+          if(text[i+1] === '"'){ cur+='"'; i++; }
+          else inQ = false;
+        }else cur += ch;
+      }else{
+        if(ch === '"') inQ = true;
+        else if(ch === ','){ row.push(cur); cur=''; }
+        else if(ch === '\n' || ch === '\r'){
+          if(cur!=='' || row.length>0){ row.push(cur); cur=''; if(!headers){ headers=row; } else { const obj={}; headers.forEach((h,idx)=>obj[h]=row[idx]??''); rows.push(obj); } row=[]; }
+        }else cur += ch;
+      }
+      i++;
+    }
+    if(cur!=='' || row.length>0){ row.push(cur); if(!headers){ headers=row; } else { const obj={}; headers.forEach((h,idx)=>obj[h]=row[idx]??''); rows.push(obj); } }
+    return rows;
+  }
+  function download(filename, content, mime){
+    const blob = new Blob([content], {type: mime});
+    const url = URL.createObjectURL(blob);
+    const a = document.getElementById('hidden-download');
+    a.href = url; a.download = filename; a.classList.remove('hidden');
+    a.click();
+    setTimeout(()=>{ URL.revokeObjectURL(url); a.classList.add('hidden'); }, 500);
+  }
+
+  // ---- App State ----
+  let state = loadState();
+
+  // ---- Builder ----
+  const fieldsEl = $('#fields');
+  function renderBuilder(){
+    fieldsEl.innerHTML = '';
+    if(state.schema.length===0){
+      const empty = document.createElement('div');
+      empty.className='hint';
+      empty.innerHTML = 'No fields yet. Add one below. Keys should be unique (e.g., <code>customer_name</code>).';
+      fieldsEl.appendChild(empty);
+    }
+    state.schema.forEach((f, idx)=>{
+      const wrap = document.createElement('div'); wrap.className='field';
+      wrap.innerHTML = `
+        <div class="stack">
+          <label>Label</label>
+          <input type="text" value="${f.label||''}" data-k="label" />
+        </div>
+        <div class="stack">
+          <label>Key</label>
+          <input type="text" value="${f.key||''}" data-k="key" />
+        </div>
+        <div class="stack">
+          <label>Type</label>
+          <select data-k="type">
+            ${['text','number','date','select','checkbox'].map(t=>`<option ${t===f.type?'selected':''} value="${t}">${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="stack">
+          <label>Meta ${f.type==='select'?'(comma-separated options)':'(placeholder or hint)'}</label>
+          <input type="text" value="${f.meta||''}" data-k="meta" />
+        </div>
+        <div class="field-row">
+          <button class="btn secondary" data-act="up">↑</button>
+          <button class="btn secondary" data-act="down">↓</button>
+          <button class="btn ghost" data-act="remove">Remove</button>
+        </div>
+      `;
+      wrap.querySelectorAll('input,select').forEach(inp=>{
+        inp.addEventListener('input', ()=>{
+          const k = inp.getAttribute('data-k');
+          let v = inp.value;
+          if(k==='key') v = slugify(v);
+          f[k] = v;
+          saveState(state);
+          renderRunner();
+        });
+      });
+      wrap.querySelector('[data-act="remove"]').addEventListener('click', ()=>{
+        state.schema.splice(idx,1);
+        saveState(state); renderBuilder(); renderRunner();
+      });
+      wrap.querySelector('[data-act="up"]').addEventListener('click', ()=>{
+        if(idx>0){ const tmp = state.schema[idx-1]; state.schema[idx-1]=state.schema[idx]; state.schema[idx]=tmp; saveState(state); renderBuilder(); renderRunner(); }
+      });
+      wrap.querySelector('[data-act="down"]').addEventListener('click', ()=>{
+        if(idx<state.schema.length-1){ const tmp = state.schema[idx+1]; state.schema[idx+1]=state.schema[idx]; state.schema[idx]=tmp; saveState(state); renderBuilder(); renderRunner(); }
+      });
+      fieldsEl.appendChild(wrap);
+    });
+  }
+
+  $('#btn-add').addEventListener('click', ()=>{
+    const type = $('#new-type').value;
+    const label = $('#new-label').value.trim() || (type[0].toUpperCase()+type.slice(1));
+    const key = slugify($('#new-key').value.trim() || label);
+    const meta = $('#new-meta').value.trim();
+    if(state.schema.some(f=>f.key===key)){
+      alert('Key must be unique.'); return;
+    }
+    state.schema.push({type,label,key,meta});
+    $('#new-label').value=''; $('#new-key').value=''; $('#new-meta').value='';
+    saveState(state); renderBuilder(); renderRunner();
+  });
+  $('#btn-save-schema').addEventListener('click', ()=>{
+    download('formlooper-schema.json', JSON.stringify(state.schema, null, 2), 'application/json');
+    const note = $('#schema-saved'); note.classList.remove('hidden'); setTimeout(()=>note.classList.add('hidden'), 1600);
+  });
+  $('#btn-load-schema').addEventListener('click', ()=>{
+    const inp = document.getElementById('hidden-file');
+    inp.accept = '.json';
+    inp.onchange = (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      file.text().then(txt=>{
+        try{
+          const schema = JSON.parse(txt);
+          if(!Array.isArray(schema)) throw new Error('Invalid schema');
+          state.schema = schema;
+          state.records = [ Object.fromEntries(schema.map(f=>[f.key, f.type==='checkbox'?false:''])) ];
+          state.index = 0;
+          saveState(state); renderBuilder(); renderRunner();
+        }catch(err){ alert('Could not parse schema JSON.'); }
+      });
+      inp.value='';
+    };
+    inp.click();
+  });
+
+  // ---- Runner ----
+  const entryArea = $('#entry-area');
+  const recIndicator = $('#rec-indicator');
+  const progressBar = $('#progress-bar');
+
+  function ensureRecordShape(rec){
+    for(const f of state.schema){
+      if(!(f.key in rec)){
+        rec[f.key] = (f.type==='checkbox')? false : '';
+      }
+    }
+    return rec;
+  }
+
+  function renderRunner(){
+    // ensure current record exists and has full shape
+    state.records[state.index] = ensureRecordShape(state.records[state.index] || {});
+    entryArea.innerHTML = '';
+    for(const f of state.schema){
+      const wrap = document.createElement('div'); wrap.className='stack';
+      const label = document.createElement('label'); label.textContent = f.label || f.key;
+      let input;
+      if(f.type==='select'){
+        input = document.createElement('select');
+        (f.meta || '').split(',').map(s=>s.trim()).filter(Boolean).forEach(opt=>{
+          const o = document.createElement('option'); o.value=opt; o.textContent=opt; input.appendChild(o);
+        });
+        if(!(state.records[state.index][f.key])) state.records[state.index][f.key] = '';
+      }else if(f.type==='checkbox'){
+        input = document.createElement('input'); input.type='checkbox';
+        input.checked = !!state.records[state.index][f.key];
+      }else{
+        input = document.createElement('input'); input.type = (f.type==='number'?'number': (f.type==='date'?'date':'text'));
+        input.placeholder = f.meta || '';
+        input.value = state.records[state.index][f.key] ?? '';
+      }
+      input.addEventListener(f.type==='checkbox'?'change':'input', ()=>{
+        state.records[state.index][f.key] = (f.type==='checkbox')? input.checked : input.value;
+        saveState(state);
+        updateProgress();
+      });
+      wrap.appendChild(label); wrap.appendChild(input);
+      entryArea.appendChild(wrap);
+    }
+    updateIndicator();
+    updateProgress();
+  }
+
+  function updateIndicator(){
+    recIndicator.textContent = `Record ${state.index+1} of ${state.records.length}`;
+  }
+  function updateProgress(){
+    if(state.schema.length===0){ progressBar.style.width = '0%'; return; }
+    const rec = state.records[state.index] || {};
+    const total = state.schema.length;
+    let filled = 0;
+    for(const f of state.schema){
+      const v = rec[f.key];
+      if(f.type==='checkbox'){ if(v===true) filled++; }
+      else if(v!==undefined && v!==null && String(v).trim()!=='') filled++;
+    }
+    const pct = Math.round((filled/total)*100);
+    progressBar.style.width = pct+'%';
+  }
+
+  function go(n){ // move by n
+    const idx = Math.min(Math.max(0, state.index + n), state.records.length-1);
+    state.index = idx; saveState(state); renderRunner();
+  }
+
+  $('#btn-first').addEventListener('click', ()=>{ state.index=0; saveState(state); renderRunner(); });
+  $('#btn-last').addEventListener('click', ()=>{ state.index=state.records.length-1; saveState(state); renderRunner(); });
+  $('#btn-prev').addEventListener('click', ()=>go(-1));
+  $('#btn-next').addEventListener('click', ()=>{
+    if(state.index===state.records.length-1){
+      // add a new record if at the end
+      const rec = {}; state.schema.forEach(f=>rec[f.key]=(f.type==='checkbox')?false:'');
+      state.records.push(rec);
+    }
+    state.index++; saveState(state); renderRunner();
+  });
+  $('#btn-add-record').addEventListener('click', ()=>{
+    const rec = {}; state.schema.forEach(f=>rec[f.key]=(f.type==='checkbox')?false:'');
+    state.records.splice(state.index+1, 0, rec);
+    state.index++; saveState(state); renderRunner();
+  });
+  $('#btn-delete-record').addEventListener('click', ()=>{
+    if(state.records.length<=1){ alert('Keep at least one record.'); return; }
+    state.records.splice(state.index,1);
+    state.index = Math.min(state.index, state.records.length-1);
+    saveState(state); renderRunner();
+  });
+
+  // keyboard shortcut: Ctrl+Enter => Next
+  document.addEventListener('keydown', (e)=>{
+    if(e.ctrlKey && e.key==='Enter'){ $('#btn-next').click(); }
+  });
+
+  // Export / Import
+  $('#btn-export-csv').addEventListener('click', ()=>{
+    // Normalize all rows to schema keys (ensure consistent columns)
+    const headers = state.schema.map(f=>f.key);
+    const rows = state.records.map(rec=>{
+      const r = {}; headers.forEach(h=>{
+        let v = rec[h];
+        if(typeof v === 'boolean') v = v ? 'TRUE' : 'FALSE';
+        r[h] = (v===undefined||v===null)?'':v;
+      });
+      return r;
+    });
+    const csv = [headers.join(',')].concat(rows.map(r=>headers.map(h=>{
+      const v = String(r[h]??'');
+      return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v;
+    }).join(','))).join('\n');
+    download('formlooper-data.csv', csv, 'text/csv');
+  });
+
+  $('#btn-import-csv').addEventListener('click', ()=>{
+    const inp = document.getElementById('hidden-file');
+    inp.accept = '.csv,.json';
+    inp.onchange = (e)=>{
+      const file = e.target.files[0]; if(!file) return;
+      const isJSON = file.name.toLowerCase().endsWith('.json');
+      file.text().then(txt=>{
+        try{
+          if(isJSON){
+            const schema = JSON.parse(txt);
+            if(!Array.isArray(schema)) throw new Error('Invalid schema JSON');
+            state.schema = schema;
+            state.records = [ Object.fromEntries(schema.map(f=>[f.key, f.type==='checkbox'?false:''])) ];
+            state.index = 0;
+            saveState(state); renderBuilder(); renderRunner();
+          }else{
+            const rows = parseCSV(txt);
+            if(rows.length===0){ alert('CSV empty.'); return; }
+            // If no schema, derive from CSV headers
+            if(state.schema.length===0){
+              const keys = Object.keys(rows[0]);
+              state.schema = keys.map(k=>({type:'text', label:k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase()), key:k, meta:''}));
+            }
+            // Normalize to current schema keys
+            const keys = state.schema.map(f=>f.key);
+            state.records = rows.map(r=>{
+              const obj = {};
+              keys.forEach(k=>{
+                let v = r[k];
+                if(v==='TRUE') v = true;
+                else if(v==='FALSE') v = false;
+                obj[k] = v ?? '';
+              });
+              return obj;
+            });
+            state.index = 0;
+            saveState(state); renderBuilder(); renderRunner();
+          }
+        }catch(err){
+          console.error(err); alert('Could not import file.');
+        }
+      });
+      inp.value='';
+    };
+    inp.click();
+  });
+
+  $('#btn-new').addEventListener('click', ()=>{
+    if(confirm('Start a fresh project? This keeps your current one saved separately in your downloads if you exported.')){
+      state = JSON.parse(JSON.stringify(defaultState));
+      saveState(state); renderBuilder(); renderRunner();
+    }
+  });
+
+  // Initial render
+  renderBuilder(); renderRunner();
+
+  // ---- PWA install ----
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', ()=>{
+      navigator.serviceWorker.register('./service-worker.js').catch(console.warn);
+    });
+  }
+  </script>
+</body>
+</html>
