@@ -1,13 +1,13 @@
 {
-  "name": "FormLooper",
-  "short_name": "FormLooper",
-  "start_url": "./index.html",
+  "name": "Neon Sweep",
+  "short_name": "NeonSweep",
+  "start_url": "./Index.html",
   "display": "standalone",
-  "background_color": "#0b1020",
-  "theme_color": "#0ea5e9",
+  "background_color": "#050816",
+  "theme_color": "#22d3ee",
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'><rect width='256' height='256' rx='56' fill='%230ea5e9'/><path d='M48 64h160v36H48zM48 116h160v36H48zM48 168h100v36H48z' fill='white'/></svg>",
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'><rect width='256' height='256' rx='56' fill='%230b1227'/><circle cx='128' cy='128' r='68' fill='%2322d3ee'/><circle cx='128' cy='128' r='30' fill='%230b1227'/><circle cx='95' cy='95' r='11' fill='white'/><circle cx='161' cy='104' r='11' fill='white'/></svg>",
       "sizes": "256x256",
       "type": "image/svg+xml",
       "purpose": "any"
