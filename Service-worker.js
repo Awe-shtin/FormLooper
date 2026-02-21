@@ -1,7 +1,9 @@
+const CACHE = 'neon-sweep-cache-v1';
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    const cache = await caches.open('formlooper-cache-v1');
-    await cache.addAll(['./', './index.html', './manifest.webmanifest']);
+    const cache = await caches.open(CACHE);
+    await cache.addAll(['./', './Index.html', './Manifest.webmanifest']);
   })());
   self.skipWaiting();
 });
@@ -9,7 +11,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k !== 'formlooper-cache-v1').map(k => caches.delete(k)));
+    await Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)));
   })());
   self.clients.claim();
 });
@@ -19,13 +21,9 @@ self.addEventListener('fetch', (event) => {
     const cached = await caches.match(event.request);
     if (cached) return cached;
     try {
-      const fresh = await fetch(event.request);
-      return fresh;
+      return await fetch(event.request);
     } catch (e) {
-      // offline fallback: serve index for navigation requests
-      if (event.request.mode === 'navigate') {
-        return caches.match('./index.html');
-      }
+      if (event.request.mode === 'navigate') return caches.match('./Index.html');
       throw e;
     }
   })());
